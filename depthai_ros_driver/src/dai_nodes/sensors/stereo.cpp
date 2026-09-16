@@ -4,6 +4,7 @@
 #include "depthai/device/DeviceBase.hpp"
 #include "depthai/pipeline/Pipeline.hpp"
 #include "depthai/pipeline/datatype/ImgFrame.hpp"
+#include "depthai/pipeline/node/ImageManip.hpp"
 #include "depthai/pipeline/node/StereoDepth.hpp"
 #include "depthai_ros_driver/dai_nodes/nn/nn_helpers.hpp"
 #include "depthai_ros_driver/dai_nodes/nn/spatial_nn_wrapper.hpp"
@@ -81,6 +82,25 @@ void Stereo::setXinXout(std::shared_ptr<dai::Pipeline> pipeline) {
         stereoLinkChoice = [&](auto input) { stereoCamNode->disparity.link(input); };
     } else {
         stereoLinkChoice = [&](auto input) { stereoCamNode->depth.link(input); };
+    }
+    if(ph->getParam<bool>("i_cropped_to_rgb_video")) {
+        // The aligned camera publishes a centered crop of its sensor (video output), so cut the same window
+        // out of the aligned depth on-device; StereoParamHandler resolved the geometry. ImageManip supports
+        // RAW16 for cropping, which is all that is asked of it; no resize or format conversion happens here.
+        int fullWidth = ph->getParam<int>("i_uncropped_width");
+        int fullHeight = ph->getParam<int>("i_uncropped_height");
+        int xOffset = ph->getParam<int>("i_crop_x_offset");
+        int yOffset = ph->getParam<int>("i_crop_y_offset");
+        int width = ph->getParam<int>("i_width");
+        int height = ph->getParam<int>("i_height");
+        cropManip = pipeline->create<dai::node::ImageManip>();
+        cropManip->initialConfig.setCropRect(static_cast<float>(xOffset) / fullWidth,
+                                             static_cast<float>(yOffset) / fullHeight,
+                                             static_cast<float>(xOffset + width) / fullWidth,
+                                             static_cast<float>(yOffset + height) / fullHeight);
+        cropManip->setMaxOutputFrameSize(width * height * 2);  // 16-bit depth, or subpixel disparity
+        stereoLinkChoice(cropManip->inputImage);
+        stereoLinkChoice = [&](auto input) { cropManip->out.link(input); };
     }
     if(ph->getParam<bool>("i_publish_topic")) {
         utils::VideoEncoderConfig encConf;
@@ -209,12 +229,18 @@ void Stereo::setupStereoQueue(std::shared_ptr<dai::Device> device) {
     pubConf.maxQSize = ph->getParam<int>("i_max_q_size");
     pubConf.publishCompressed = ph->getParam<bool>("i_publish_compressed");
     // Depth covers the full field of view of the socket it is aligned to (or of the right sensor when not
-    // aligned), resized to i_width x i_height. StereoDepth aligns to the sensor, not to the aligned
-    // camera's video crop, so only the sensor readout size matters here.
+    // aligned), resized to the StereoDepth output size; when the aligned camera publishes a video crop
+    // the published depth is then a centered crop of that (see StereoParamHandler). StereoDepth aligns to
+    // the sensor, never to the video crop, so the sensor readout size is the starting point in both cases.
     std::string geometrySocketName =
         ph->getParam<bool>("i_align_depth") ? ph->getParam<std::string>("i_socket_name") : getSocketName(rightSensInfo.socket);
     pubConf.sensorWidth = ph->getOtherNodeParam<int>(geometrySocketName, "i_sensor_width", 0);
     pubConf.sensorHeight = ph->getOtherNodeParam<int>(geometrySocketName, "i_sensor_height", 0);
+    if(ph->getParam<bool>("i_cropped_to_rgb_video")) {
+        pubConf.ispWidth = ph->getParam<int>("i_uncropped_width");
+        pubConf.ispHeight = ph->getParam<int>("i_uncropped_height");
+        pubConf.croppedFromIsp = true;
+    }
 
     stereoPub->setup(device, convConfig, pubConf);
 }

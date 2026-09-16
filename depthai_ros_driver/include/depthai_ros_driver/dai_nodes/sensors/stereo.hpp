@@ -16,6 +16,7 @@ class ImgFrame;
 class DataOutputQueue;
 namespace node {
 class StereoDepth;
+class ImageManip;
 }  // namespace node
 namespace ros {
 class Timer;
@@ -67,6 +68,8 @@ class Stereo : public BaseNode {
     void syncTimerCB();
     std::shared_ptr<sensor_helpers::ImagePublisher> stereoPub, leftRectPub, rightRectPub;
     std::shared_ptr<dai::node::StereoDepth> stereoCamNode;
+    /// Crops the aligned depth to the aligned camera's video window when that camera publishes a crop; null otherwise.
+    std::shared_ptr<dai::node::ImageManip> cropManip;
     std::unique_ptr<SensorWrapper> left;
     std::unique_ptr<SensorWrapper> right;
     std::unique_ptr<BaseNode> featureTrackerLeftR, featureTrackerRightR, nnNode;

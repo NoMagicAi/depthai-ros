@@ -118,6 +118,59 @@ void StereoParamHandler::declareParams(std::shared_ptr<dai::node::StereoDepth> s
     width = declareAndLogParam<int>("i_width", width);
     height = declareAndLogParam<int>("i_height", height);
     stereo->setOutputSize(width, height);
+
+    // Crop the aligned depth to the window the aligned camera actually publishes. A ColorCamera video
+    // output (i_output_isp: false, or low bandwidth) is a centered crop of its ISP frame, while
+    // StereoDepth aligns depth to the sensor's FULL field of view regardless, so without the crop the
+    // two frames would come out the same size but cover different scenes. This is not a user setting:
+    // whenever the aligned camera publishes a crop, depth follows automatically. The crop itself is an
+    // ImageManip node added in Stereo::setXinXout; here we only resolve its geometry. Afterwards
+    // i_width/i_height describe the published (cropped) frame, as with the decimation filter below;
+    // i_cropped_to_rgb_video, i_uncropped_width/height and i_crop_*_offset are outputs written for the
+    // Stereo node (always overwritten, any value in the config is ignored).
+    bool cropToRgbVideo = false;
+    int cropXOffset = 0, cropYOffset = 0, cropWidth = width, cropHeight = height;
+    if(!socketName.empty()) {
+        bool videoLinked = !getOtherNodeParam<bool>(socketName, "i_output_isp", true) || getOtherNodeParam<bool>(socketName, "i_low_bandwidth", false);
+        int ispWidth = getOtherNodeParam<int>(socketName, "i_isp_width", 0);
+        int ispHeight = getOtherNodeParam<int>(socketName, "i_isp_height", 0);
+        int videoWidth = getOtherNodeParam<int>(socketName, "i_width");
+        int videoHeight = getOtherNodeParam<int>(socketName, "i_height");
+        cropToRgbVideo = videoLinked && ispWidth > 0 && ispHeight > 0 && (videoWidth < ispWidth || videoHeight < ispHeight);
+        if(cropToRgbVideo) {
+            if((width * videoWidth) % ispWidth != 0 || (height * videoHeight) % ispHeight != 0) {
+                ROS_WARN("Depth %dx%d cropped to %s video %dx%d of ISP %dx%d is not a whole number of pixels; rounding down",
+                         width,
+                         height,
+                         socketName.c_str(),
+                         videoWidth,
+                         videoHeight,
+                         ispWidth,
+                         ispHeight);
+            }
+            cropWidth = width * videoWidth / ispWidth;
+            cropHeight = height * videoHeight / ispHeight;
+            cropXOffset = (width - cropWidth) / 2;
+            cropYOffset = (height - cropHeight) / 2;
+            ROS_INFO("Cropping aligned depth %dx%d to %dx%d at (%d, %d) to match the %s video crop",
+                     width,
+                     height,
+                     cropWidth,
+                     cropHeight,
+                     cropXOffset,
+                     cropYOffset,
+                     socketName.c_str());
+        }
+    }
+    declareAndLogParam<bool>("i_cropped_to_rgb_video", cropToRgbVideo, true);
+    declareAndLogParam<int>("i_uncropped_width", width, true);
+    declareAndLogParam<int>("i_uncropped_height", height, true);
+    declareAndLogParam<int>("i_crop_x_offset", cropXOffset, true);
+    declareAndLogParam<int>("i_crop_y_offset", cropYOffset, true);
+    if(cropToRgbVideo) {
+        width = declareAndLogParam<int>("i_width", cropWidth, true);
+        height = declareAndLogParam<int>("i_height", cropHeight, true);
+    }
     stereo->setDefaultProfilePreset(depthPresetMap.at(declareAndLogParam<std::string>("i_depth_preset", "HIGH_ACCURACY")));
     if(declareAndLogParam<bool>("i_enable_distortion_correction", false)) {
         stereo->enableDistortionCorrection(true);
@@ -176,6 +229,9 @@ void StereoParamHandler::declareParams(std::shared_ptr<dai::node::StereoDepth> s
         config.postProcessing.brightnessFilter.maxBrightness = declareAndLogParam<int>("i_brightness_filter_max_brightness", 256);
     }
     if(declareAndLogParam<bool>("i_enable_decimation_filter", false)) {
+        if(cropToRgbVideo) {
+            throw std::runtime_error("i_enable_decimation_filter cannot be combined with depth aligned to a cropped video output");
+        }
         config.postProcessing.decimationFilter.decimationMode =
             utils::getValFromMap(declareAndLogParam<std::string>("i_decimation_filter_decimation_mode", "PIXEL_SKIPPING"), decimationModeMap);
         config.postProcessing.decimationFilter.decimationFactor = declareAndLogParam<int>("i_decimation_filter_decimation_factor", 1);
