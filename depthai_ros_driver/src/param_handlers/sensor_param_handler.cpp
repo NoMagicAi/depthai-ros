@@ -69,6 +69,10 @@ void SensorParamHandler::declareParams(std::shared_ptr<dai::node::MonoCamera> mo
     monoCam->setResolution(utils::getValFromMap(resString, dai_nodes::sensor_helpers::monoResolutionMap));
     declareAndLogParam<int>("i_width", monoCam->getResolutionWidth());
     declareAndLogParam<int>("i_height", monoCam->getResolutionHeight());
+    // Informational, always overwritten: the readout size of the selected mode, read by the stereo node
+    // to derive camera_info for frames of this sensor (see ImgPublisherConfig::sensorWidth).
+    declareAndLogParam<int>("i_sensor_width", monoCam->getResolutionWidth(), true);
+    declareAndLogParam<int>("i_sensor_height", monoCam->getResolutionHeight(), true);
     size_t iso = declareAndLogParam("r_iso", 800, getRangedIntDescriptor(100, 1600));
     size_t exposure = declareAndLogParam("r_exposure", 1000, getRangedIntDescriptor(1, 33000));
 
@@ -177,6 +181,14 @@ void SensorParamHandler::declareParams(std::shared_ptr<dai::node::ColorCamera> c
         videoHeight = maxVideoHeight;
     }
     colorCam->setVideoSize(videoWidth, videoHeight);
+    // Informational, always overwritten: readout size of the selected mode and the ISP output size, read
+    // by the stereo node to derive camera_info for depth aligned to this sensor (see
+    // ImgPublisherConfig::sensorWidth). Depth alignment covers the sensor's field of view regardless of
+    // any video crop, so the crop is not published here.
+    declareAndLogParam<int>("i_sensor_width", colorCam->getResolutionWidth(), true);
+    declareAndLogParam<int>("i_sensor_height", colorCam->getResolutionHeight(), true);
+    declareAndLogParam<int>("i_isp_width", colorCam->getIspWidth(), true);
+    declareAndLogParam<int>("i_isp_height", colorCam->getIspHeight(), true);
     colorCam->setPreviewKeepAspectRatio(declareAndLogParam("i_keep_preview_aspect_ratio", true));
     size_t iso = declareAndLogParam("r_iso", 800, getRangedIntDescriptor(100, 1600));
     size_t exposure = declareAndLogParam("r_exposure", 20000, getRangedIntDescriptor(1, 33000));

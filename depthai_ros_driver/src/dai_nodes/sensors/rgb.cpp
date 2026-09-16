@@ -1,5 +1,7 @@
 #include "depthai_ros_driver/dai_nodes/sensors/rgb.hpp"
 
+#include <tuple>
+
 #include "depthai/device/DataQueue.hpp"
 #include "depthai/device/Device.hpp"
 #include "depthai/pipeline/Pipeline.hpp"
@@ -91,6 +93,11 @@ void RGB::setupQueues(std::shared_ptr<dai::Device> device) {
         pubConfig.height = ph->getParam<int>("i_height");
         pubConfig.maxQSize = ph->getParam<int>("i_max_q_size");
         pubConfig.publishCompressed = ph->getParam<bool>("i_publish_compressed");
+        // Frame geometry for camera_info: the isp output is the ISP frame itself, the video output is a
+        // centered crop of it (ColorCamera::getSensorCrop), never a resize.
+        std::tie(pubConfig.sensorWidth, pubConfig.sensorHeight) = colorCamNode->getResolutionSize();
+        std::tie(pubConfig.ispWidth, pubConfig.ispHeight) = colorCamNode->getIspSize();
+        pubConfig.croppedFromIsp = !ph->getParam<bool>("i_output_isp") || ph->getParam<bool>("i_low_bandwidth");
 
         rgbPub->setup(device, convConfig, pubConfig);
     }

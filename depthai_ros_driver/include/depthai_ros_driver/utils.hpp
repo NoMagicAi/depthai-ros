@@ -76,6 +76,18 @@ struct ImgPublisherConfig {
     int maxQSize = 8;
     bool qBlocking = false;
     bool publishCompressed = false;
+    // Geometry of the published width x height frame relative to the sensor, used to derive the
+    // camera_info intrinsics from the calibration (sensor_helpers::getCalibInfo). The chain is
+    //   calibration frame -> sensor readout of the selected resolution mode (crop and/or binning)
+    //                     -> ISP frame (uniform ISP scaling)
+    //                     -> published frame (a resize of the ISP frame, or a centered crop of it).
+    // sensorWidth == 0 means unknown: the published frame is then treated as a plain resize of the
+    // calibration frame, which is the historical behaviour.
+    int sensorWidth = 0;
+    int sensorHeight = 0;
+    int ispWidth = 0;   // defaults to the sensor size when 0
+    int ispHeight = 0;
+    bool croppedFromIsp = false;  // published frame is a centered crop of the ISP frame (ColorCamera video output)
 };
 std::shared_ptr<dai::node::XLinkOut> setupXout(std::shared_ptr<dai::Pipeline> pipeline, const std::string& name);
 }  // namespace utils

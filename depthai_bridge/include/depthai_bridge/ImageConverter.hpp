@@ -111,6 +111,19 @@ class ImageConverter {
                                                   Point2f topLeftPixelId = Point2f(),
                                                   Point2f bottomRightPixelId = Point2f());
 
+    /**
+     * Build a CameraInfo for a width x height frame of cameraId from caller-supplied 3x3 intrinsics,
+     * instead of letting CalibrationHandler resize the calibrated ones. Distortion, rectification
+     * rotation and the stereo projection matrix are still taken from the calibration. Use this when
+     * the published frame is not a plain resize of the calibration frame (sensor-mode crop, ISP
+     * scaling followed by a video crop, ...) and the caller has derived the intrinsics itself.
+     */
+    ImageMsgs::CameraInfo calibrationToCameraInfo(dai::CalibrationHandler calibHandler,
+                                                  dai::CameraBoardSocket cameraId,
+                                                  int width,
+                                                  int height,
+                                                  const std::vector<std::vector<float>>& intrinsics);
+
    private:
     static std::unordered_map<dai::RawImgFrame::Type, std::string> encodingEnumMap;
     static std::unordered_map<dai::RawImgFrame::Type, std::string> planarEncodingEnumMap;

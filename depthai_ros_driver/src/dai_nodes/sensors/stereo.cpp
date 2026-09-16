@@ -156,6 +156,9 @@ void Stereo::setupRectQueue(std::shared_ptr<dai::Device> device,
     pubConfig.socket = sensorInfo.socket;
     pubConfig.infoMgrSuffix = "rect";
     pubConfig.publishCompressed = ph->getParam<bool>(isLeft ? "i_left_rect_publish_compressed" : "i_right_rect_publish_compressed");
+    // Rectified frames cover the sensor's readout; its size is published by the sensor's param handler.
+    pubConfig.sensorWidth = ph->getOtherNodeParam<int>(sensorName, "i_sensor_width", 0);
+    pubConfig.sensorHeight = ph->getOtherNodeParam<int>(sensorName, "i_sensor_height", 0);
 
     pub->setup(device, convConfig, pubConfig);
 }
@@ -205,6 +208,13 @@ void Stereo::setupStereoQueue(std::shared_ptr<dai::Device> device) {
     pubConf.lazyPub = ph->getParam<bool>("i_enable_lazy_publisher");
     pubConf.maxQSize = ph->getParam<int>("i_max_q_size");
     pubConf.publishCompressed = ph->getParam<bool>("i_publish_compressed");
+    // Depth covers the full field of view of the socket it is aligned to (or of the right sensor when not
+    // aligned), resized to i_width x i_height. StereoDepth aligns to the sensor, not to the aligned
+    // camera's video crop, so only the sensor readout size matters here.
+    std::string geometrySocketName =
+        ph->getParam<bool>("i_align_depth") ? ph->getParam<std::string>("i_socket_name") : getSocketName(rightSensInfo.socket);
+    pubConf.sensorWidth = ph->getOtherNodeParam<int>(geometrySocketName, "i_sensor_width", 0);
+    pubConf.sensorHeight = ph->getOtherNodeParam<int>(geometrySocketName, "i_sensor_height", 0);
 
     stereoPub->setup(device, convConfig, pubConf);
 }

@@ -1,6 +1,10 @@
 #include "depthai_ros_driver/dai_nodes/sensors/sensor_helpers.hpp"
 
+#include <cmath>
+#include <tuple>
+
 #include "camera_info_manager/camera_info_manager.h"
+#include "depthai/device/Device.hpp"
 #include "depthai-shared/common/CameraSensorType.hpp"
 #include "depthai/pipeline/Pipeline.hpp"
 #include "depthai/pipeline/node/VideoEncoder.hpp"
@@ -161,6 +165,107 @@ sensor_msgs::CameraInfo getCalibInfo(
         info = converter->calibrationToCameraInfo(calibHandler, socket, width, height);
     } catch(std::runtime_error& e) {
         ROS_ERROR("No calibration for socket %d! Publishing empty camera_info.", static_cast<int>(socket));
+    }
+    return info;
+}
+
+namespace {
+using Intrinsics = std::vector<std::vector<float>>;
+
+Intrinsics scaleIntrinsics(Intrinsics k, float sx, float sy) {
+    k[0][0] *= sx;
+    k[0][2] *= sx;
+    k[1][1] *= sy;
+    k[1][2] *= sy;
+    return k;
+}
+
+// Intrinsics of a width x height window whose top-left corner sits at (x0, y0) in the source frame.
+Intrinsics cropIntrinsics(Intrinsics k, float x0, float y0) {
+    k[0][2] -= x0;
+    k[1][2] -= y0;
+    return k;
+}
+
+bool sameAspectRatio(int w1, int h1, int w2, int h2) {
+    // Sizes are integers, so a 1% tolerance separates 4:3 from 16:9 comfortably while absorbing rounding
+    // such as 1352x1012 vs 4056x3040.
+    return std::abs(static_cast<float>(w1) * h2 - static_cast<float>(h1) * w2) < 0.01f * w1 * h2;
+}
+}  // namespace
+
+Intrinsics intrinsicsForSensorMode(Intrinsics intrinsics, int calWidth, int calHeight, int modeWidth, int modeHeight) {
+    if(sameAspectRatio(calWidth, calHeight, modeWidth, modeHeight)) {
+        return scaleIntrinsics(intrinsics, static_cast<float>(modeWidth) / calWidth, static_cast<float>(modeHeight) / calHeight);
+    }
+    // Different aspect ratio: the sensor exposes the mode as a centered window of the readout it was
+    // calibrated at, binned by a power of two. The binning factor is the power of two nearest to the
+    // size ratio (1 for 12MP -> 4K, 2 for 12MP -> 1080P, 1 for 800P -> 720P, 2 for 800P -> 400P); a
+    // factor below one means the calibration frame is the smaller window (1080P calibration, 12MP mode).
+    float ratio = std::min(static_cast<float>(calWidth) / modeWidth, static_cast<float>(calHeight) / modeHeight);
+    float binning = std::exp2(std::round(std::log2(ratio)));
+    float windowWidth = modeWidth * binning;
+    float windowHeight = modeHeight * binning;
+    ROS_INFO("Sensor mode %dx%d interpreted as a centered %gx%g window of the %dx%d calibration frame binned %gx",
+             modeWidth,
+             modeHeight,
+             windowWidth,
+             windowHeight,
+             calWidth,
+             calHeight,
+             binning);
+    intrinsics = cropIntrinsics(intrinsics, (calWidth - windowWidth) / 2.0f, (calHeight - windowHeight) / 2.0f);
+    return scaleIntrinsics(intrinsics, 1.0f / binning, 1.0f / binning);
+}
+
+sensor_msgs::CameraInfo getCalibInfo(std::shared_ptr<dai::ros::ImageConverter> converter,
+                                     std::shared_ptr<dai::Device> device,
+                                     const utils::ImgPublisherConfig& pubConfig) {
+    if(pubConfig.sensorWidth <= 0 || pubConfig.sensorHeight <= 0) {
+        return getCalibInfo(converter, device, pubConfig.socket, pubConfig.width, pubConfig.height);
+    }
+    sensor_msgs::CameraInfo info;
+    auto calibHandler = device->readCalibration();
+    try {
+        Intrinsics intrinsics;
+        int calWidth, calHeight;
+        std::tie(intrinsics, calWidth, calHeight) = calibHandler.getDefaultIntrinsics(pubConfig.socket);
+
+        // 1. calibration frame -> sensor readout of the selected mode
+        intrinsics = intrinsicsForSensorMode(intrinsics, calWidth, calHeight, pubConfig.sensorWidth, pubConfig.sensorHeight);
+        // 2. ISP scaling (uniform in practice, but apply per axis to match what the ISP produced)
+        int ispWidth = pubConfig.ispWidth > 0 ? pubConfig.ispWidth : pubConfig.sensorWidth;
+        int ispHeight = pubConfig.ispHeight > 0 ? pubConfig.ispHeight : pubConfig.sensorHeight;
+        intrinsics = scaleIntrinsics(
+            intrinsics, static_cast<float>(ispWidth) / pubConfig.sensorWidth, static_cast<float>(ispHeight) / pubConfig.sensorHeight);
+        // 3. ISP frame -> published frame
+        if(pubConfig.croppedFromIsp) {
+            // ColorCamera video output: centered crop, offset floored like ColorCamera::getSensorCrop
+            if(pubConfig.width > ispWidth || pubConfig.height > ispHeight) {
+                throw std::runtime_error("Published frame is larger than the ISP frame it is supposed to be cropped from");
+            }
+            intrinsics = cropIntrinsics(intrinsics, std::floor((ispWidth - pubConfig.width) / 2.0f), std::floor((ispHeight - pubConfig.height) / 2.0f));
+        } else {
+            intrinsics = scaleIntrinsics(intrinsics, static_cast<float>(pubConfig.width) / ispWidth, static_cast<float>(pubConfig.height) / ispHeight);
+        }
+        ROS_INFO("%s camera_info: calibration %dx%d -> sensor %dx%d -> isp %dx%d -> %s %dx%d, fx %.1f fy %.1f cx %.1f cy %.1f",
+                 pubConfig.daiNodeName.c_str(),
+                 calWidth,
+                 calHeight,
+                 pubConfig.sensorWidth,
+                 pubConfig.sensorHeight,
+                 ispWidth,
+                 ispHeight,
+                 pubConfig.croppedFromIsp ? "crop" : "resize",
+                 pubConfig.width,
+                 pubConfig.height,
+                 intrinsics[0][0],
+                 intrinsics[1][1],
+                 intrinsics[0][2],
+                 intrinsics[1][2]);
+        info = converter->calibrationToCameraInfo(calibHandler, pubConfig.socket, pubConfig.width, pubConfig.height, intrinsics);
+    } catch(std::runtime_error& e) {
+        ROS_ERROR("No usable calibration for socket %d (%s)! Publishing empty camera_info.", static_cast<int>(pubConfig.socket), e.what());
     }
     return info;
 }

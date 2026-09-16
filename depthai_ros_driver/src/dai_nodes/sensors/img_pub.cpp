@@ -114,7 +114,7 @@ void ImagePublisher::createInfoManager(std::shared_ptr<dai::Device> device) {
     infoManager = std::make_shared<camera_info_manager::CameraInfoManager>(ros::NodeHandle(node, pubConfig.daiNodeName + pubConfig.infoMgrSuffix),
                                                                            "/" + pubConfig.daiNodeName + pubConfig.infoMgrSuffix);
     if(pubConfig.calibrationFile.empty()) {
-        auto info = sensor_helpers::getCalibInfo(converter, device, pubConfig.socket, pubConfig.width, pubConfig.height);
+        auto info = sensor_helpers::getCalibInfo(converter, device, pubConfig);
         if(pubConfig.rectified) {
             std::fill(info.D.begin(), info.D.end(), 0.0);
             info.R[0] = info.R[4] = info.R[8] = 1.0;

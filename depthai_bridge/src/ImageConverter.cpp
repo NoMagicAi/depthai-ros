@@ -402,29 +402,33 @@ cv::Mat ImageConverter::rosMsgtoCvMat(ImageMsgs::Image& inMsg) {
 
 ImageMsgs::CameraInfo ImageConverter::calibrationToCameraInfo(
     dai::CalibrationHandler calibHandler, dai::CameraBoardSocket cameraId, int width, int height, Point2f topLeftPixelId, Point2f bottomRightPixelId) {
-    std::vector<std::vector<float>> camIntrinsics, rectifiedRotation;
+    int defWidth, defHeight;
+    std::tie(std::ignore, defWidth, defHeight) = calibHandler.getDefaultIntrinsics(cameraId);
+    if(width == -1) {
+        width = defWidth;
+    }
+    if(height == -1) {
+        height = defHeight;
+    }
+    // CalibrationHandler treats the requested size as a resize of the calibration frame (fitting the
+    // aspect ratio by cropping the longer side). That is wrong when the sensor mode itself is a crop of
+    // the calibration frame (e.g. 4K on a 12MP-calibrated IMX378); callers that know the frame geometry
+    // should derive the intrinsics themselves and use the overload taking them explicitly.
+    auto camIntrinsics = calibHandler.getCameraIntrinsics(cameraId, width, height, topLeftPixelId, bottomRightPixelId);
+    return calibrationToCameraInfo(calibHandler, cameraId, width, height, camIntrinsics);
+}
+
+ImageMsgs::CameraInfo ImageConverter::calibrationToCameraInfo(
+    dai::CalibrationHandler calibHandler, dai::CameraBoardSocket cameraId, int width, int height, const std::vector<std::vector<float>>& camIntrinsics) {
+    std::vector<std::vector<float>> rectifiedRotation;
     std::vector<float> distCoeffs;
     std::vector<double> flatIntrinsics, distCoeffsDouble;
-    int defWidth, defHeight;
     ImageMsgs::CameraInfo cameraData;
-    std::tie(std::ignore, defWidth, defHeight) = calibHandler.getDefaultIntrinsics(cameraId);
 
-    if(width == -1) {
-        cameraData.width = static_cast<uint32_t>(defWidth);
-    } else {
-        cameraData.width = static_cast<uint32_t>(width);
-    }
-
-    if(height == -1) {
-        cameraData.height = static_cast<uint32_t>(defHeight);
-    } else {
-        cameraData.height = static_cast<uint32_t>(height);
-    }
-
+    cameraData.width = static_cast<uint32_t>(width);
+    cameraData.height = static_cast<uint32_t>(height);
     camWidth = cameraData.width;
     camHeight = cameraData.height;
-
-    camIntrinsics = calibHandler.getCameraIntrinsics(cameraId, cameraData.width, cameraData.height, topLeftPixelId, bottomRightPixelId);
 
     flatIntrinsics.resize(9);
     for(int i = 0; i < 3; i++) {
@@ -451,8 +455,7 @@ ImageMsgs::CameraInfo ImageConverter::calibrationToCameraInfo(
     // Setting Projection matrix if the cameras are stereo pair. Right as the first and left as the second.
     if(calibHandler.getStereoRightCameraId() != dai::CameraBoardSocket::AUTO && calibHandler.getStereoLeftCameraId() != dai::CameraBoardSocket::AUTO) {
         if(calibHandler.getStereoRightCameraId() == cameraId || calibHandler.getStereoLeftCameraId() == cameraId) {
-            std::vector<std::vector<float>> stereoIntrinsics =
-                calibHandler.getCameraIntrinsics(cameraId, cameraData.width, cameraData.height, topLeftPixelId, bottomRightPixelId);
+            std::vector<std::vector<float>> stereoIntrinsics = camIntrinsics;
 
             if(alphaScalingEnabled) {
                 cv::Mat cameraMatrix = cv::Mat(3, 3, CV_64F);

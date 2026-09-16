@@ -1,5 +1,7 @@
 #include "depthai_ros_driver/dai_nodes/sensors/mono.hpp"
 
+#include <tuple>
+
 #include "depthai/device/DataQueue.hpp"
 #include "depthai/device/Device.hpp"
 #include "depthai/pipeline/Pipeline.hpp"
@@ -75,6 +77,9 @@ void Mono::setupQueues(std::shared_ptr<dai::Device> device) {
         pubConf.height = ph->getParam<int>("i_height");
         pubConf.maxQSize = ph->getParam<int>("i_max_q_size");
         pubConf.publishCompressed = ph->getParam<bool>("i_publish_compressed");
+        // Frame geometry for camera_info: a MonoCamera publishes its readout as-is (e.g. 720P is a crop
+        // of an 800P-calibrated OV9282, not a stretch of it).
+        std::tie(pubConf.sensorWidth, pubConf.sensorHeight) = monoCamNode->getResolutionSize();
 
         imagePublisher->setup(device, convConf, pubConf);
     }
