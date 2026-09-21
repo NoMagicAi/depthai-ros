@@ -18,6 +18,7 @@
 #include "depthai_bridge/ImageConverter.hpp"
 #include "depthai_ros_driver_v3/dai_nodes/sensors/sensor_helpers.hpp"
 #include "depthai_ros_driver_v3/utils.hpp"
+#include "rclcpp/node_interfaces/node_topics_interface.hpp"
 #include "ffmpeg_image_transport_msgs/msg/ffmpeg_packet.hpp"
 #include "image_transport/image_transport.hpp"
 #include "sensor_msgs/msg/compressed_image.hpp"
@@ -66,17 +67,15 @@ void ImagePublisher::setup(std::shared_ptr<dai::Device> device, const utils::Img
 #ifdef NOMAGIC_ROS1
         // NoMagic: mirror the image + camera_info pair on ROS1 (plain publishers).
         if(ros1::Ros1Node::active()) {
-            auto imgTopic =
-                rclcpp::expand_topic_or_service_name(pubConfig.topicName + pubConfig.topicSuffix, node->get_name(), node->get_namespace(), false);
-            auto infoTopic = rclcpp::expand_topic_or_service_name(
-                pubConfig.topicName + pubConfig.infoSuffix + "/camera_info", node->get_name(), node->get_namespace(), false);
-            ros1Pub = ros1::Ros1Node::advertiseCamera(imgTopic, infoTopic);
+            // resolve_topic_name() (not expand_topic_or_service_name()) so that `--ros-args -r`
+            // remappings apply: the ROS1 mirror has to land on the same names as the ROS2 side.
+            auto& topics = *node->get_node_topics_interface();
+            ros1Pub = ros1::Ros1Node::advertiseCamera(topics.resolve_topic_name(pubConfig.topicName + pubConfig.topicSuffix),
+                                                      topics.resolve_topic_name(pubConfig.topicName + pubConfig.infoSuffix + "/camera_info"));
             if(pubConfig.hostSideUpscale > 0.0) {
-                auto upImgTopic = rclcpp::expand_topic_or_service_name(
-                    upscaledTopicName() + pubConfig.topicSuffix, node->get_name(), node->get_namespace(), false);
-                auto upInfoTopic = rclcpp::expand_topic_or_service_name(
-                    upscaledTopicName() + pubConfig.infoSuffix + "/camera_info", node->get_name(), node->get_namespace(), false);
-                ros1UpscaledPub = ros1::Ros1Node::advertiseCamera(upImgTopic, upInfoTopic);
+                ros1UpscaledPub =
+                    ros1::Ros1Node::advertiseCamera(topics.resolve_topic_name(upscaledTopicName() + pubConfig.topicSuffix),
+                                                    topics.resolve_topic_name(upscaledTopicName() + pubConfig.infoSuffix + "/camera_info"));
             }
         }
 #endif
