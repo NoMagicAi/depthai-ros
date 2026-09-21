@@ -7,13 +7,18 @@ image path); TFs, if ever enabled, remain a job for the bridge.
 
 ## What the ROS1 side provides
 
-With a v2.11.2-noetic-equivalent config (see `nomagic/` configs) and a ROS master running:
+With a v2.11.2-noetic-equivalent config and a ROS master running:
 
 - `/<node>/rgb/image_raw`, `/<node>/rgb/camera_info`,
   `/<node>/stereo/image_raw`, `/<node>/stereo/camera_info` — plain `ros::Publisher`s fed with
   the very same messages the ROS2 publishers get (converted field-by-field; `header.seq` = 0).
   Lazy publishing (`i_enable_lazy_publisher`) is evaluated per graph: each side publishes when
   *it* has subscribers.
+- `/<node>/stereo/upscaled/image_raw`, `/<node>/stereo/upscaled/camera_info` when
+  `stereo.i_nomagic_host_side_upscale` is set (see below) — mirrored like any other pair.
+- Topic names follow the `--ros-args -r` remap rules, so both graphs always agree on the
+  contract. A driver started with `-r __ns:=/<node> -r rgb/image_raw:=rgb/image_rect`
+  publishes `/<node>/<node>/rgb/image_rect` on ROS1 too.
 - `/<node>/start_camera`, `/<node>/stop_camera`, `/<node>/save_pipeline`,
   `/<node>/save_calibration` — `std_srvs/Trigger`, the v2.x ROS1 service names (the ROS2 graph
   keeps the v3 names `start_driver`/`stop_driver`/...). Note: v2.11.2 mis-bound
@@ -53,12 +58,34 @@ New files (never conflict):
 
 Hooks in upstream files (all guarded by `#ifdef NOMAGIC_ROS1` / `if(NOMAGIC_ROS1)`):
 1. `CMakeLists.txt`: one `option()` + `if(NOMAGIC_ROS1)` block after the target definitions.
-2. `include/.../img_pub.hpp`: one include + one `ros1Pub` member.
+2. `include/.../img_pub.hpp`: one include + the `ros1Pub` / `ros1UpscaledPub` members.
 3. `src/dai_nodes/sensors/img_pub.cpp`: advertise in `setup()` (non-compressed branch),
-   publish in `publish(std::shared_ptr<Image>)` before the ROS2 publish (which may move the
-   message out).
+   publish in `publish(std::shared_ptr<Image>)` and `publishUpscaled()` before the ROS2
+   publish (which may move the message out).
 4. `src/driver.cpp`: one include; `Ros1Node::init(get_name())` at the top of the start timer;
    the four `advertiseTrigger` calls next to the ROS2 service registrations.
+
+## Host-side depth upscale (`stereo.i_nomagic_host_side_upscale`)
+
+Independent of ROS1, but carried in this fork for the same NoMagic camera image: setting the
+stereo parameter to a factor > 0 makes the stereo `ImagePublisher` publish a second
+image + camera_info pair under `<topic>/upscaled`, nearest-neighbour resized by that factor
+with `width`, `height`, K, P and `roi` scaled the way `image_proc/resize` scales them. This
+replaces the ROS1 `image_proc/resize` nodelet the v2.x NoMagic image used to load next to the
+driver: the device keeps producing (and shipping over PoE) a small RGB-aligned depth raster,
+while subscribers that need colour-image resolution get the resized copy. The resize only runs
+when someone subscribes on either graph, and INTER_NEAREST keeps 0 = "no depth" pixels invalid
+instead of blending them into plausible depth at object edges.
+
+It lives in `ImagePublisher` (hooks 2 and 3 above) rather than in a separate publisher object,
+so it reuses the single device queue and the ROS1 mirror gets it for free.
+
+## Where the image lives
+
+The Docker image that builds this fork for NoMagic robots is
+`gripper-ros/docker/camera-driver-luxonis3/` in the `monomagic` repository, together with the
+process supervisor, the healthcheck and the per-camera ROS2 params files. This repository
+carries the driver changes only.
 
 Unrelated fix carried in this fork: `Driver::startDevice()` accepts `X_LINK_ANY_STATE` in the
 connect-by-IP fallback so unicast-only networks (no broadcast discovery) work.
