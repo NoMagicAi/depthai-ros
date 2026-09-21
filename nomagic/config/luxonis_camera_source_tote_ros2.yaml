@@ -1,0 +1,191 @@
+# ROS2 (depthai-ros v3.3.0-humble, depthai-core v3) config for luxonis_camera_source_tote.
+# Translated from the v2.11.2-noetic ROS1 config rendered from
+# attachments/luxonis_camera_config.j2 + luxonis-camera-source-tote.yaml
+# (camera_ip=10.2.20.102, rgb_exposure=20000, rgb_whitebalance=4200, rgb_iso=100,
+#  rgb_resolution=1080P -> published RGB 1920x1080, fps tier 10.0, depth 640x360).
+#
+# ROS1 flattened names `<node>_<param>` map to ROS2 nested `<node>.<param>`.
+# v2->v3 renames and gaps are documented in exp03 write-up / summary.md.
+/luxonis_camera_source_tote:
+  ros__parameters:
+    driver:                       # v2: camera_*
+      i_ip: "10.2.20.102"
+      i_enable_ir: true
+      # v2: camera_i_laser_dot_brightness: 1200 (mA, range 0..1200)
+      # v3: normalized intensity 0..1 -> 1200 mA == 1.0
+      r_laser_dot_intensity: 1.0
+      # v2: camera_i_floodlight_brightness: 0
+      r_floodlight_intensity: 0.0
+      i_usb_speed: SUPER_PLUS
+      i_pipeline_dump: false
+      i_calibration_dump: false
+      i_external_calibration_path: ""
+      i_restart_on_diagnostics_error: true
+      i_rs_compat: false
+      # protected: the driver must NOT publish TF (see GRIPAI-307); v3 default is true!
+      i_publish_tf_from_calibration: false
+      i_tf_device_name: luxonis_camera_source_tote   # v2: camera_i_tf_camera_name
+      i_tf_device_model: ""                          # v2: camera_i_tf_camera_model
+      i_tf_base_frame: luxonis_camera_source_tote
+      i_tf_parent_frame: world
+      i_tf_cam_pos_x: "0.0"
+      i_tf_cam_pos_y: "0.0"
+      i_tf_cam_pos_z: "0.0"
+      i_tf_cam_roll: "0.0"
+      i_tf_cam_pitch: "0.0"
+      i_tf_cam_yaw: "0.0"
+      i_tf_imu_from_descr: "false"
+      i_tf_custom_urdf_location: ""
+      i_tf_custom_xacro_args: ""
+    pipeline_gen:
+      i_pipeline_type: RGBD       # v2: camera_i_pipeline_type
+      i_nn_type: none             # v2: camera_i_nn_type
+      i_enable_imu: false
+      i_enable_diagnostics: true  # v2: camera_i_enable_diagnostics + pipeline_gen_i_enable_diagnostics
+      i_enable_rgbd: false
+      i_enable_vio: false
+    rgb:
+      i_publish_topic: true
+      i_board_socket_id: 0
+      # v2: rgb_i_resolution: 1080P + rgb_i_output_isp: true (full-FOV 16:9 1920x1080)
+      # v3: no sensor-mode param; request 1920x1080 output, CROP resize mode keeps
+      # aspect by cropping (16:9 out of the 4:3 sensor -> full horizontal FOV).
+      i_width: 1920
+      i_height: 1080
+      i_resize_mode: CROP
+      # v2 published the raw (distorted) ISP frame; v3 default true would undistort.
+      i_undistorted: false
+      i_fps: 10.0                 # fps tier for published width 1920 (>1280 -> 10.0)
+      r_set_man_exposure: true
+      r_exposure: 20000
+      r_iso: 100
+      r_set_man_whitebalance: true
+      r_whitebalance: 4200
+      # protected: deliberate focus canary from the ROS1 template (lens pos 0 = infinity)
+      r_set_man_focus: true
+      r_focus: 0
+      # v2 applied sharpness/denoise values unconditionally; v3 needs r_set_* guards
+      r_set_sharpness: true
+      r_sharpness: 0
+      r_set_luma_denoise: true
+      r_luma_denoise: 0
+      r_set_chroma_denoise: true
+      r_chroma_denoise: 0
+      i_enable_lazy_publisher: true
+      i_max_q_size: 2
+      i_low_bandwidth: false
+      i_publish_compressed: false
+      i_synced: false
+      i_get_base_device_timestamp: false
+      i_update_ros_base_time_on_ros_msg: true
+      i_add_exposure_offset: false
+      i_exposure_offset: 0
+      i_calibration_file: ""
+      i_simulate_from_topic: false
+      i_simulated_topic_name: ""
+      i_disable_node: false
+      i_enable_feature_tracker: false
+      i_enable_nn: false
+      i_reverse_stereo_socket_order: false
+    stereo:
+      i_publish_topic: true
+      i_board_socket_id: 0        # align depth to CAM_A (rgb)
+      i_left_socket_id: 1
+      i_right_socket_id: 2
+      i_socket_name: rgb
+      i_aligned: true             # v2: stereo_i_align_depth
+      i_run_align_on_host: true   # v3-only knob (ImageAlign node placement), default kept
+      # StereoDepth output over the ISP frame: 640x360 (upscaled to RGB by a separate host node in ROS1)
+      i_width: 640
+      i_height: 360
+      i_fps: 10.0
+      i_set_input_size: true
+      i_input_width: 1280
+      i_input_height: 720
+      i_depth_preset: DEFAULT
+      i_disparity_width: DISPARITY_64
+      i_extended_disp: false
+      i_subpixel: true
+      i_subpixel_fractional_bits: 5
+      i_lr_check: true
+      i_lrc_threshold: 12
+      i_stereo_conf_threshold: 245
+      i_bilateral_sigma: 0
+      # v2: stereo_i_depth_filter_size: 5 (median filter) - NOT settable in v3 (commented out upstream)
+      i_enable_distortion_correction: false   # v3 default true
+      i_set_disparity_to_depth_use_spec_translation: false
+      i_enable_alpha_scaling: false
+      i_enable_companding: false
+      i_enable_decimation_filter: false
+      i_enable_disparity_shift: false
+      i_enable_spatial_filter: true
+      i_spatial_filter_hole_filling_radius: 2
+      i_spatial_filter_alpha: 0.5
+      i_spatial_filter_delta: 20
+      i_spatial_filter_iterations: 1
+      i_enable_speckle_filter: false
+      i_enable_temporal_filter: false
+      i_enable_threshold_filter: false
+      i_output_disparity: false
+      i_left_rect_publish_topic: false        # v2: stereo_i_publish_left_rect
+      i_right_rect_publish_topic: false       # v2: stereo_i_publish_right_rect
+      i_left_rect_synced: false
+      i_right_rect_synced: false
+      i_enable_lazy_publisher: true
+      i_max_q_size: 2
+      i_low_bandwidth: false
+      i_publish_compressed: false
+      i_synced: false
+      i_get_base_device_timestamp: false
+      i_update_ros_base_time_on_ros_msg: true
+      i_add_exposure_offset: false
+      i_exposure_offset: 0
+      i_reverse_stereo_socket_order: false
+      i_calibration_file: ""
+      i_use_neural_depth: false
+    left:
+      i_board_socket_id: 1
+      i_publish_topic: false
+      i_fps: 10.0
+      r_set_man_exposure: true
+      r_exposure: 8000
+      r_iso: 100
+      i_max_q_size: 2
+      i_enable_lazy_publisher: true
+      i_get_base_device_timestamp: false
+      i_update_ros_base_time_on_ros_msg: false
+      i_calibration_file: ""
+      i_simulate_from_topic: false
+      i_simulated_topic_name: ""
+      i_disable_node: false
+      i_enable_feature_tracker: false
+      i_enable_nn: false
+      i_reverse_stereo_socket_order: false
+      i_add_exposure_offset: false
+      i_exposure_offset: 0
+      i_synced: false
+      i_low_bandwidth: false
+      i_publish_compressed: false
+    right:
+      i_board_socket_id: 2
+      i_publish_topic: false
+      i_fps: 10.0
+      r_set_man_exposure: true
+      r_exposure: 8000
+      r_iso: 100
+      i_max_q_size: 2
+      i_enable_lazy_publisher: true
+      i_get_base_device_timestamp: false
+      i_update_ros_base_time_on_ros_msg: false
+      i_calibration_file: ""
+      i_simulate_from_topic: false
+      i_simulated_topic_name: ""
+      i_disable_node: false
+      i_enable_feature_tracker: false
+      i_enable_nn: false
+      i_reverse_stereo_socket_order: false
+      i_add_exposure_offset: false
+      i_exposure_offset: 0
+      i_synced: false
+      i_low_bandwidth: false
+      i_publish_compressed: false
