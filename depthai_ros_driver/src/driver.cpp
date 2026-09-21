@@ -252,7 +252,10 @@ void Driver::startDevice() {
                         }
                     } else if(!ip.empty() && info.name == ip) {
                         RCLCPP_INFO(get_logger(), "Connecting to the device using ip: %s", ip.c_str());
-                        if(info.state == X_LINK_UNBOOTED || info.state == X_LINK_BOOTLOADER || info.state == X_LINK_GATE) {
+                        // X_LINK_ANY_STATE covers the manual DeviceInfo(ip) fallback used when
+                        // broadcast autodiscovery cannot reach the device (unicast-only networks).
+                        if(info.state == X_LINK_UNBOOTED || info.state == X_LINK_BOOTLOADER || info.state == X_LINK_GATE
+                           || info.state == X_LINK_ANY_STATE) {
                             device = std::make_shared<dai::Device>(info);
                             camRunning = true;
                         } else if(info.state == X_LINK_BOOTED || info.state == X_LINK_GATE_BOOTED) {
