@@ -124,6 +124,54 @@ target_link_libraries(
 add_executable(driver_node src/driver_node.cpp)
 target_link_libraries(driver_node PUBLIC ${PROJECT_NAME} ${SENSOR_LIB_NAME}
   ${NN_LIB_NAME} ${COMMON_LIB_NAME})
+
+# ---------------------------------------------------------------------------
+# NoMagic: optional native ROS1 ("ROS One") support. One guarded block + the
+# cmake/ and src/ros1/ files + a few #ifdef NOMAGIC_ROS1 hooks; upstream builds
+# with the option OFF are unchanged. See docs/NOMAGIC_ROS1.md.
+option(NOMAGIC_ROS1 "Also publish images and serve trigger services on ROS1" OFF)
+if(NOMAGIC_ROS1)
+  # find_ros1_package() needs the ROS1 setup.bash sourced (PKG_CONFIG_PATH).
+  include(cmake/find_ros1_package.cmake)
+  find_ros1_package(roscpp REQUIRED)
+  find_ros1_package(std_srvs REQUIRED)
+  find_ros1_package(sensor_msgs REQUIRED)
+  # All ROS1 code is confined to one helper library: the flat ROS1 include tree
+  # (/opt/ros/one/include) shadows same-named ROS2 headers (pluginlib, tf2_ros,
+  # class_loader, ...), so its include dirs must stay PRIVATE to the single
+  # translation unit ros1_node.cpp (the public ros1_node.hpp is ROS1-free).
+  set(ROS1_LIB_NAME ${PROJECT_NAME}_nomagic_ros1)
+  add_library(${ROS1_LIB_NAME} SHARED src/ros1/ros1_node.cpp)
+  target_include_directories(${ROS1_LIB_NAME} SYSTEM PRIVATE
+    ${ros1_roscpp_INCLUDE_DIRS}
+    ${ros1_std_srvs_INCLUDE_DIRS}
+    ${ros1_sensor_msgs_INCLUDE_DIRS})
+  target_link_libraries(${ROS1_LIB_NAME}
+    PUBLIC rclcpp::rclcpp ${sensor_msgs_TARGETS}
+    PRIVATE ${ros1_roscpp_LIBRARIES} ${ros1_std_srvs_LIBRARIES} ${ros1_sensor_msgs_LIBRARIES})
+  # PUBLIC define: NOMAGIC_ROS1 changes the ImagePublisher class layout in
+  # img_pub.hpp, so every dependent target must see it.
+  target_compile_definitions(${COMMON_LIB_NAME} PUBLIC NOMAGIC_ROS1=1)
+  target_link_libraries(${COMMON_LIB_NAME} PUBLIC ${ROS1_LIB_NAME})
+  # Force RPATH instead of RUNPATH so the link-time library directories (both
+  # /opt/ros/humble/lib and the ROS1 lib dir) win over LD_LIBRARY_PATH no matter
+  # which stack was sourced last (same-soname libraries exist in both distros).
+  foreach(_t ${ROS1_LIB_NAME} ${COMMON_LIB_NAME} ${SENSOR_LIB_NAME} ${NN_LIB_NAME} ${PROJECT_NAME} driver_node)
+    target_link_options(${_t} PRIVATE "-Wl,--disable-new-dtags")
+    set_target_properties(${_t} PROPERTIES
+      INSTALL_RPATH_USE_LINK_PATH TRUE
+      BUILD_RPATH_USE_ORIGIN TRUE
+      SKIP_BUILD_RPATH FALSE)
+  endforeach()
+  install(
+    TARGETS ${ROS1_LIB_NAME}
+    EXPORT ${PROJECT_NAME}Targets
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin)
+endif()
+# ---------------------------------------------------------------------------
+
 rclcpp_components_register_nodes(${PROJECT_NAME} PLUGIN
   "depthai_ros_driver::Driver" EXECUTABLE driver)
 pluginlib_export_plugin_description_file(${PROJECT_NAME} plugins.xml)

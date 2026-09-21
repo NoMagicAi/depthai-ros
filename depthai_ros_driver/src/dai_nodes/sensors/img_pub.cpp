@@ -52,6 +52,16 @@ void ImagePublisher::setup(std::shared_ptr<dai::Device> device, const utils::Img
             node->create_publisher<sensor_msgs::msg::CameraInfo>(pubConfig.topicName + pubConfig.infoSuffix + "/camera_info", rclcpp::QoS(10), pubOptions);
     } else {
         imgPubIT = image_transport::create_camera_publisher(node.get(), pubConfig.topicName + pubConfig.topicSuffix);
+#ifdef NOMAGIC_ROS1
+        // NoMagic: mirror the image + camera_info pair on ROS1 (plain publishers).
+        if(ros1::Ros1Node::active()) {
+            auto imgTopic =
+                rclcpp::expand_topic_or_service_name(pubConfig.topicName + pubConfig.topicSuffix, node->get_name(), node->get_namespace(), false);
+            auto infoTopic = rclcpp::expand_topic_or_service_name(
+                pubConfig.topicName + pubConfig.infoSuffix + "/camera_info", node->get_name(), node->get_namespace(), false);
+            ros1Pub = ros1::Ros1Node::advertiseCamera(imgTopic, infoTopic);
+        }
+#endif
     }
     if(!synced) {
         if(encConfig.enabled) {
@@ -212,6 +222,13 @@ void ImagePublisher::publish(std::shared_ptr<Image> img) {
         }
         infoPub->publish(std::move(img->info));
     } else {
+#ifdef NOMAGIC_ROS1
+        // NoMagic: publish on ROS1 first (the ROS2 path may move the data out).
+        // Lazy publishing is evaluated per graph.
+        if(ros1Pub && (!pubConfig.lazyPub || ros1Pub->hasSubscribers())) {
+            ros1Pub->publish(*img->image, *img->info);
+        }
+#endif
         if(!pubConfig.lazyPub || imgPubIT.getNumSubscribers() > 0) {
             if(ipcEnabled) {
                 imgPubIT.publish(std::move(img->image), std::move(img->info));

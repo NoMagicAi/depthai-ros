@@ -11,6 +11,10 @@
 #include "sensor_msgs/msg/compressed_image.hpp"
 #include "sensor_msgs/msg/image.hpp"
 
+#ifdef NOMAGIC_ROS1
+#include "depthai_ros_driver_v3/ros1/ros1_node.hpp"
+#endif
+
 namespace dai {
 class Device;
 class Pipeline;
@@ -103,6 +107,9 @@ class ImagePublisher {
     rclcpp::Publisher<ffmpeg_image_transport_msgs::msg::FFMPEGPacket>::SharedPtr ffmpegPub;
     rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr compressedImgPub;
     image_transport::CameraPublisher imgPubIT;
+#ifdef NOMAGIC_ROS1
+    std::shared_ptr<ros1::Ros1CameraPublisher> ros1Pub;
+#endif
     std::shared_ptr<dai::MessageQueue> dataQ;
     int cbID;
     std::string qName;

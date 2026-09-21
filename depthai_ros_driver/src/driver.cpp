@@ -10,6 +10,10 @@
 #include "diagnostic_msgs/msg/diagnostic_array.hpp"
 #include "rmw/qos_profiles.h"
 
+#ifdef NOMAGIC_ROS1
+#include "depthai_ros_driver_v3/ros1/ros1_node.hpp"
+#endif
+
 namespace depthai_ros_driver {
 
 Driver::Driver(const rclcpp::NodeOptions& options) : rclcpp::Node("driver", options) {
@@ -19,6 +23,11 @@ Driver::Driver(const rclcpp::NodeOptions& options) : rclcpp::Node("driver", opti
     if(!starting) {
         startTimer = this->create_wall_timer(std::chrono::seconds(1), [this]() {
             starting = true;
+#ifdef NOMAGIC_ROS1
+            // NoMagic: bring up the ROS1 side (same node name) before the pipeline is
+            // built so image publishers can mirror their topics on ROS1.
+            ros1::Ros1Node::init(get_name());
+#endif
             start();
             srvGroup = this->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
 
@@ -38,6 +47,27 @@ Driver::Driver(const rclcpp::NodeOptions& options) : rclcpp::Node("driver", opti
 
             diagSub =
                 this->create_subscription<diagnostic_msgs::msg::DiagnosticArray>("/diagnostics", 10, std::bind(&Driver::diagCB, this, std::placeholders::_1));
+#ifdef NOMAGIC_ROS1
+            // NoMagic: same Trigger services on ROS1, under the v2.x ROS1 driver names
+            // (start_camera/stop_camera/...). Unlike v2.11.2, save_pipeline and
+            // save_calibration are bound to the correct callbacks.
+            ros1::Ros1Node::advertiseTrigger("start_camera", [this](std::string&) {
+                start();
+                return true;
+            });
+            ros1::Ros1Node::advertiseTrigger("stop_camera", [this](std::string&) {
+                stop();
+                return true;
+            });
+            ros1::Ros1Node::advertiseTrigger("save_pipeline", [this](std::string&) {
+                savePipeline();
+                return true;
+            });
+            ros1::Ros1Node::advertiseTrigger("save_calibration", [this](std::string&) {
+                saveCalib();
+                return true;
+            });
+#endif
             RCLCPP_INFO(get_logger(), "Driver ready!");
             startTimer->cancel();
         });
