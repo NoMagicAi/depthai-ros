@@ -76,6 +76,11 @@ struct ImgPublisherConfig {
     int maxQSize = 8;
     bool qBlocking = false;
     bool publishCompressed = false;
+    /// Host-side upscale factor for an extra image + camera_info pair published under
+    /// `<topicName>/upscaled`. 0 (the default) disables the second publisher entirely.
+    /// Intended for depth streams produced at a lower resolution than the colour image they
+    /// are aligned to: the device ships the small raster and the host resizes it.
+    double hostSideUpscale = 0.0;
 };
 }  // namespace utils
 }  // namespace depthai_ros_driver

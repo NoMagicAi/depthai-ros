@@ -2,6 +2,14 @@
 
 #include <rclcpp/logging.hpp>
 
+#if __has_include("cv_bridge/cv_bridge.hpp")
+    #include "cv_bridge/cv_bridge.hpp"
+#else
+    #include "cv_bridge/cv_bridge.h"
+#endif
+
+#include <opencv2/imgproc.hpp>
+
 #include "camera_info_manager/camera_info_manager.hpp"
 #include "depthai/device/Device.hpp"
 #include "depthai/pipeline/Pipeline.hpp"
@@ -52,6 +60,9 @@ void ImagePublisher::setup(std::shared_ptr<dai::Device> device, const utils::Img
             node->create_publisher<sensor_msgs::msg::CameraInfo>(pubConfig.topicName + pubConfig.infoSuffix + "/camera_info", rclcpp::QoS(10), pubOptions);
     } else {
         imgPubIT = image_transport::create_camera_publisher(node.get(), pubConfig.topicName + pubConfig.topicSuffix);
+        if(pubConfig.hostSideUpscale > 0.0) {
+            upscaledPubIT = image_transport::create_camera_publisher(node.get(), upscaledTopicName() + pubConfig.topicSuffix);
+        }
 #ifdef NOMAGIC_ROS1
         // NoMagic: mirror the image + camera_info pair on ROS1 (plain publishers).
         if(ros1::Ros1Node::active()) {
@@ -60,6 +71,13 @@ void ImagePublisher::setup(std::shared_ptr<dai::Device> device, const utils::Img
             auto infoTopic = rclcpp::expand_topic_or_service_name(
                 pubConfig.topicName + pubConfig.infoSuffix + "/camera_info", node->get_name(), node->get_namespace(), false);
             ros1Pub = ros1::Ros1Node::advertiseCamera(imgTopic, infoTopic);
+            if(pubConfig.hostSideUpscale > 0.0) {
+                auto upImgTopic = rclcpp::expand_topic_or_service_name(
+                    upscaledTopicName() + pubConfig.topicSuffix, node->get_name(), node->get_namespace(), false);
+                auto upInfoTopic = rclcpp::expand_topic_or_service_name(
+                    upscaledTopicName() + pubConfig.infoSuffix + "/camera_info", node->get_name(), node->get_namespace(), false);
+                ros1UpscaledPub = ros1::Ros1Node::advertiseCamera(upImgTopic, upInfoTopic);
+            }
         }
 #endif
     }
@@ -213,6 +231,92 @@ std::shared_ptr<Image> ImagePublisher::convertData(const std::shared_ptr<dai::AD
     img->info = std::move(infoMsg);
     return img;
 }
+std::string ImagePublisher::upscaledTopicName() const {
+    return pubConfig.topicName + "/upscaled";
+}
+
+bool ImagePublisher::upscaleNeeded() {
+    if(pubConfig.hostSideUpscale <= 0.0) {
+        return false;
+    }
+    if(!pubConfig.lazyPub) {
+        return true;
+    }
+    if(upscaledPubIT.getNumSubscribers() > 0) {
+        return true;
+    }
+#ifdef NOMAGIC_ROS1
+    if(ros1UpscaledPub && ros1UpscaledPub->hasSubscribers()) {
+        return true;
+    }
+#endif
+    return false;
+}
+
+std::shared_ptr<Image> ImagePublisher::upscaleImage(const Image& img) const {
+    const auto& src = *img.image;
+    cv::Mat srcMat(static_cast<int>(src.height),
+                   static_cast<int>(src.width),
+                   cv_bridge::getCvType(src.encoding),
+                   const_cast<uint8_t*>(src.data.data()),
+                   static_cast<size_t>(src.step));
+    cv::Mat dstMat;
+    // INTER_NEAREST: any interpolating mode would blend the 0 = "no depth" pixels with their
+    // neighbours and invent depth values along object edges.
+    cv::resize(srcMat, dstMat, cv::Size(), pubConfig.hostSideUpscale, pubConfig.hostSideUpscale, cv::INTER_NEAREST);
+
+    auto scaled = std::make_shared<Image>();
+    auto image = std::make_unique<sensor_msgs::msg::Image>();
+    image->header = src.header;
+    image->height = static_cast<uint32_t>(dstMat.rows);
+    image->width = static_cast<uint32_t>(dstMat.cols);
+    image->encoding = src.encoding;
+    image->is_bigendian = src.is_bigendian;
+    image->step = static_cast<uint32_t>(dstMat.step);
+    image->data.assign(dstMat.datastart, dstMat.dataend);
+
+    // Same intrinsics scaling as image_proc/resize, so the upscaled pair stays usable for
+    // projection: focal lengths and principal point follow the raster, the rest is unchanged.
+    const double scaleX = static_cast<double>(dstMat.cols) / static_cast<double>(src.width);
+    const double scaleY = static_cast<double>(dstMat.rows) / static_cast<double>(src.height);
+    auto info = std::make_unique<sensor_msgs::msg::CameraInfo>(*img.info);
+    info->width = image->width;
+    info->height = image->height;
+    info->k[0] *= scaleX;  // fx
+    info->k[2] *= scaleX;  // cx
+    info->k[4] *= scaleY;  // fy
+    info->k[5] *= scaleY;  // cy
+    info->p[0] *= scaleX;  // fx
+    info->p[2] *= scaleX;  // cx
+    info->p[3] *= scaleX;  // Tx
+    info->p[5] *= scaleY;  // fy
+    info->p[6] *= scaleY;  // cy
+    info->roi.x_offset = static_cast<uint32_t>(info->roi.x_offset * scaleX);
+    info->roi.y_offset = static_cast<uint32_t>(info->roi.y_offset * scaleY);
+    info->roi.width = static_cast<uint32_t>(info->roi.width * scaleX);
+    info->roi.height = static_cast<uint32_t>(info->roi.height * scaleY);
+
+    scaled->image = std::move(image);
+    scaled->info = std::move(info);
+    return scaled;
+}
+
+void ImagePublisher::publishUpscaled(std::shared_ptr<Image> img) {
+#ifdef NOMAGIC_ROS1
+    // NoMagic: publish on ROS1 first (the ROS2 path may move the data out).
+    if(ros1UpscaledPub && (!pubConfig.lazyPub || ros1UpscaledPub->hasSubscribers())) {
+        ros1UpscaledPub->publish(*img->image, *img->info);
+    }
+#endif
+    if(!pubConfig.lazyPub || upscaledPubIT.getNumSubscribers() > 0) {
+        if(ipcEnabled) {
+            upscaledPubIT.publish(std::move(img->image), std::move(img->info));
+        } else {
+            upscaledPubIT.publish(*img->image, *img->info);
+        }
+    }
+}
+
 void ImagePublisher::publish(std::shared_ptr<Image> img) {
     if(pubConfig.publishCompressed) {
         if(encConfig.profile == dai::VideoEncoderProperties::Profile::MJPEG) {
@@ -222,6 +326,11 @@ void ImagePublisher::publish(std::shared_ptr<Image> img) {
         }
         infoPub->publish(std::move(img->info));
     } else {
+        // Resize before the publishes below: with intra-process comms they move the message out.
+        std::shared_ptr<Image> upscaled;
+        if(img->image && upscaleNeeded()) {
+            upscaled = upscaleImage(*img);
+        }
 #ifdef NOMAGIC_ROS1
         // NoMagic: publish on ROS1 first (the ROS2 path may move the data out).
         // Lazy publishing is evaluated per graph.
@@ -235,6 +344,9 @@ void ImagePublisher::publish(std::shared_ptr<Image> img) {
             } else {
                 imgPubIT.publish(*img->image, *img->info);
             }
+        }
+        if(upscaled) {
+            publishUpscaled(std::move(upscaled));
         }
     }
 }

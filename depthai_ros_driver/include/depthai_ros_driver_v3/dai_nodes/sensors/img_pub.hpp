@@ -94,6 +94,16 @@ class ImagePublisher {
     std::shared_ptr<dai::node::VideoEncoder> createEncoder(std::shared_ptr<dai::Pipeline> pipeline, const utils::VideoEncoderConfig& encoderConfig);
 
    private:
+    /// Base topic of the extra upscaled pair, i.e. `<topicName>/upscaled`.
+    std::string upscaledTopicName() const;
+    /// True when the upscaled pair has to be produced for this frame (always, unless lazy
+    /// publishing is on and nobody subscribes on either graph).
+    bool upscaleNeeded();
+    /// Nearest-neighbour resize of `img` by `pubConfig.hostSideUpscale`, with the intrinsics
+    /// in camera_info scaled to match.
+    std::shared_ptr<Image> upscaleImage(const Image& img) const;
+    void publishUpscaled(std::shared_ptr<Image> img);
+
     std::shared_ptr<rclcpp::Node> node;
     utils::VideoEncoderConfig encConfig;
     utils::ImgPublisherConfig pubConfig;
@@ -107,8 +117,11 @@ class ImagePublisher {
     rclcpp::Publisher<ffmpeg_image_transport_msgs::msg::FFMPEGPacket>::SharedPtr ffmpegPub;
     rclcpp::Publisher<sensor_msgs::msg::CompressedImage>::SharedPtr compressedImgPub;
     image_transport::CameraPublisher imgPubIT;
+    /// Only created when pubConfig.hostSideUpscale > 0.
+    image_transport::CameraPublisher upscaledPubIT;
 #ifdef NOMAGIC_ROS1
     std::shared_ptr<ros1::Ros1CameraPublisher> ros1Pub;
+    std::shared_ptr<ros1::Ros1CameraPublisher> ros1UpscaledPub;
 #endif
     std::shared_ptr<dai::MessageQueue> dataQ;
     int cbID;

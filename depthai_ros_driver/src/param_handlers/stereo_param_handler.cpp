@@ -57,6 +57,10 @@ StereoParamHandler::StereoParamHandler(std::shared_ptr<rclcpp::Node> node, const
     declareAndLogParam<bool>(ParamNames::ADD_EXPOSURE_OFFSET, false);
     declareAndLogParam<int>(ParamNames::EXPOSURE_OFFSET, 0);
     declareAndLogParam<bool>(ParamNames::ENABLE_LAZY_PUBLISHER, true);
+    // Extra host-side upscaled depth pair under <topic>/upscaled; 0 = off. Lets the device
+    // produce (and ship) a small depth raster while subscribers that need the colour-image
+    // resolution get a nearest-neighbour resized copy with matching intrinsics.
+    declareAndLogParam<double>("i_nomagic_host_side_upscale", 0.0);
     declareAndLogParam<bool>(ParamNames::REVERSE_STEREO_SOCKET_ORDER, false);
     declareAndLogParam<bool>(ParamNames::PUBLISH_COMPRESSED, false);
     declareAndLogParam<float>(ParamNames::FPS, 30);
